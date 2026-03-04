@@ -58,34 +58,34 @@ class KernelJBPatcher(
         self.patches = []
 
         # Group A: Existing patches
-        self.patch_amfi_cdhash_in_trustcache()
-        self.patch_amfi_execve_kill_path()
-        self.patch_task_conversion_eval_internal()
-        self.patch_sandbox_hooks_extended()
+        # self.patch_amfi_cdhash_in_trustcache()          # A1
+        # self.patch_amfi_execve_kill_path()              # A2
+        # self.patch_task_conversion_eval_internal()      # A3
+        # self.patch_sandbox_hooks_extended()             # A4
 
         # Group B: Simple patches (string-anchored / pattern-matched)
-        self.patch_post_validation_additional()
-        self.patch_proc_security_policy()
-        self.patch_proc_pidinfo()
-        self.patch_convert_port_to_map()
-        self.patch_vm_fault_enter_prepare()
-        self.patch_vm_map_protect()
-        self.patch_mac_mount()
-        self.patch_dounmount()
-        self.patch_bsd_init_auth()
-        self.patch_spawn_validate_persona()
-        self.patch_task_for_pid()
-        self.patch_load_dylinker()
-        self.patch_shared_region_map()
-        self.patch_nvram_verify_permission()
-        self.patch_io_secure_bsd_root()
-        self.patch_thid_should_crash()
+        # self.patch_post_validation_additional()         # B5
+        # self.patch_proc_security_policy()               # B6
+        # self.patch_proc_pidinfo()                       # B7
+        # self.patch_convert_port_to_map()                # B8
+        # self.patch_vm_fault_enter_prepare()             # B9
+        # self.patch_vm_map_protect()                     # B10
+        # self.patch_mac_mount()                          # B11
+        # self.patch_dounmount()                          # B12
+        # self.patch_bsd_init_auth()                      # B13
+        # self.patch_spawn_validate_persona()             # B14
+        # self.patch_task_for_pid()                       # B15
+        # self.patch_load_dylinker()                      # B16
+        # self.patch_shared_region_map()                  # B17
+        # self.patch_nvram_verify_permission()            # B18
+        # self.patch_io_secure_bsd_root()                 # B19
+        # self.patch_thid_should_crash()                  # B20
 
         # Group C: Complex shellcode patches
-        self.patch_cred_label_update_execve()
-        self.patch_syscallmask_apply_to_proc()
-        self.patch_hook_cred_label_update_execve()
-        self.patch_kcall10()
+        # self.patch_cred_label_update_execve()           # C21
+        # self.patch_syscallmask_apply_to_proc()          # C22
+        # self.patch_hook_cred_label_update_execve()      # C23
+        # self.patch_kcall10()                            # C24
 
         return self.patches
 

@@ -61,13 +61,13 @@ COMPONENTS = [
 JB_COMPONENTS = [
     # (name, search_base_is_restore, search_patterns, patch_function, preserve_payp)
     ("iBSS (JB)", True, ["Firmware/dfu/iBSS.vresearch101.RELEASE.im4p"], patch_ibss_jb, False),
-    # (
-    #     "kernelcache (JB)",
-    #     True,
-    #     ["kernelcache.research.vphone600"],
-    #     patch_kernelcache_jb,
-    #     True,
-    # ),
+    (
+        "kernelcache (JB)",
+        True,
+        ["kernelcache.research.vphone600"],
+        patch_kernelcache_jb,
+        True,
+    ),
 ]
 
 
