@@ -1,6 +1,5 @@
 """kernel_jb.py — Jailbreak extension patcher for iOS kernelcache."""
 
-import os
 import time
 
 from .kernel_jb_base import KernelJBPatcherBase
@@ -61,48 +60,45 @@ class KernelJBPatcher(
 ):
     _TIMING_LOG_MIN_SECONDS = 10.0
 
-    # Default low-risk schedule.
-    _DEFAULT_METHODS = (
-        "patch_amfi_cdhash_in_trustcache",      # A1
-        "patch_amfi_execve_kill_path",          # A2
-        "patch_cred_label_update_execve",       # C21 (low-riskized)
-        "patch_hook_cred_label_update_execve",  # C23 (low-riskized)
-        "patch_kcall10",                        # C24 (low-riskized)
-        "patch_post_validation_additional",     # B5
-        "patch_syscallmask_apply_to_proc",      # C22
-        "patch_task_conversion_eval_internal",  # A3
-        "patch_sandbox_hooks_extended",         # A4
-        "patch_iouc_failed_macf",              # A5
-        "patch_proc_security_policy",           # B6
-        "patch_proc_pidinfo",                   # B7
-        "patch_convert_port_to_map",            # B8
+    # Group A: Core gate-bypass methods.
+    _GROUP_A_METHODS = (
+        "patch_amfi_cdhash_in_trustcache",      # JB-01 / A1
+        "patch_amfi_execve_kill_path",          # JB-02 / A2
+        "patch_task_conversion_eval_internal",  # JB-08 / A3
+        "patch_sandbox_hooks_extended",         # JB-09 / A4
+        "patch_iouc_failed_macf",              # JB-10 / A5
     )
 
-    # Validated hit methods that are currently not part of default schedule.
-    _OPTIONAL_METHODS = (
-        "patch_bsd_init_auth",
-        "patch_dounmount",
-        "patch_io_secure_bsd_root",
-        "patch_load_dylinker",
-        "patch_mac_mount",
-        "patch_nvram_verify_permission",
-        "patch_shared_region_map",
-        "patch_spawn_validate_persona",
-        "patch_task_for_pid",
-        "patch_thid_should_crash",
-        "patch_vm_fault_enter_prepare",
-        "patch_vm_map_protect",
+    # Group C: Shellcode/trampoline heavy methods.
+    _GROUP_C_METHODS = (
+        "patch_cred_label_update_execve",       # JB-03 / C21 (low-riskized)
+        "patch_hook_cred_label_update_execve",  # JB-04 / C23 (low-riskized)
+        "patch_kcall10",                        # JB-05 / C24 (low-riskized)
+        "patch_syscallmask_apply_to_proc",      # JB-07 / C22
     )
 
-    # Reserved for future use if a method is re-classified as high-impact.
-    _HIGH_RISK_METHODS = ()
+    # Group B: Pattern/string anchored methods.
+    _GROUP_B_METHODS = (
+        "patch_post_validation_additional",     # JB-06 / B5
+        "patch_proc_security_policy",           # JB-11 / B6
+        "patch_proc_pidinfo",                   # JB-12 / B7
+        "patch_convert_port_to_map",            # JB-13 / B8
+        "patch_bsd_init_auth",                  # JB-14 / B13
+        "patch_dounmount",                      # JB-15 / B12
+        "patch_io_secure_bsd_root",             # JB-16 / B19
+        "patch_load_dylinker",                  # JB-17 / B16
+        "patch_mac_mount",                      # JB-18 / B11
+        "patch_nvram_verify_permission",        # JB-19 / B18
+        "patch_shared_region_map",              # JB-20 / B17
+        "patch_spawn_validate_persona",         # JB-21 / B14
+        "patch_task_for_pid",                   # JB-22 / B15
+        "patch_thid_should_crash",              # JB-23 / B20
+        "patch_vm_fault_enter_prepare",         # JB-24 / B9
+        "patch_vm_map_protect",                 # JB-25 / B10
+    )
 
-    # Reserved for future use if a method becomes no-hit on target kernels.
-    _NOHIT_METHODS = ()
-
-    # Compatibility fields used by local tooling/reporting.
-    _GROUP_AB_METHODS = _DEFAULT_METHODS
-    _GROUP_C_METHODS = ()
+    # Full JB patch schedule (all validated patch methods enabled by default).
+    _PATCH_METHODS = _GROUP_A_METHODS + _GROUP_C_METHODS + _GROUP_B_METHODS
 
     def __init__(self, data, verbose=False):
         super().__init__(data, verbose)
@@ -122,42 +118,12 @@ class KernelJBPatcher(
         for method_name in methods:
             self._run_patch_method_timed(method_name)
 
-    @staticmethod
-    def _env_enabled(name):
-        v = os.environ.get(name, "").strip().lower()
-        return v in ("1", "true", "yes", "on")
-
-    @staticmethod
-    def _parse_method_list(raw):
-        if not raw:
-            return []
-        return [item.strip() for item in raw.split(",") if item.strip()]
-
     def _build_method_plan(self):
-        methods = list(self._DEFAULT_METHODS)
-
-        if self._env_enabled("VPHONE_JB_ENABLE_OPTIONAL"):
-            methods.extend(self._OPTIONAL_METHODS)
-        if self._env_enabled("VPHONE_JB_ENABLE_HIGH_RISK"):
-            methods.extend(self._HIGH_RISK_METHODS)
-
-        methods.extend(
-            self._parse_method_list(os.environ.get("VPHONE_JB_EXTRA_METHODS", ""))
-        )
-
-        disabled = set(
-            self._parse_method_list(os.environ.get("VPHONE_JB_DISABLE_METHODS", ""))
-        )
-        allow_nohit = self._env_enabled("VPHONE_JB_ALLOW_NOHIT")
-
+        methods = list(self._PATCH_METHODS)
         final = []
         seen = set()
         for method_name in methods:
             if method_name in seen:
-                continue
-            if method_name in disabled:
-                continue
-            if not allow_nohit and method_name in self._NOHIT_METHODS:
                 continue
             if not callable(getattr(self, method_name, None)):
                 continue
