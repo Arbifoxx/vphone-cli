@@ -25,6 +25,8 @@ class VPhoneControl {
     private(set) var isConnected = false
     private(set) var guestName = ""
     private(set) var guestCaps: [String] = []
+    static let ipaInstallUnavailableMessage =
+        "Guest is not jailbroken or no IPA installer is available. Skipping IPA install."
 
     /// Path to the signed vphoned binary. When set, enables auto-update.
     var guestBinaryURL: URL?
@@ -90,6 +92,104 @@ class VPhoneControl {
             case let .guestError(msg): msg
             }
         }
+    }
+
+    var canInstallIPA: Bool {
+        isConnected
+    }
+
+    private static func bundleIdentifier(fromIPA url: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [
+            "-c",
+            """
+import plistlib, sys, zipfile
+ipa_path = sys.argv[1]
+with zipfile.ZipFile(ipa_path, "r") as zf:
+    plist_name = next((name for name in zf.namelist() if name.startswith("Payload/") and name.endswith(".app/Info.plist")), None)
+    if not plist_name:
+        raise SystemExit("missing app Info.plist in IPA")
+    info = plistlib.loads(zf.read(plist_name))
+    bundle_id = info.get("CFBundleIdentifier")
+    if not bundle_id:
+        raise SystemExit("missing CFBundleIdentifier in IPA")
+    print(bundle_id)
+""",
+            url.path,
+        ]
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+        process.waitUntilExit()
+
+        let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if process.terminationStatus == 0, !output.isEmpty {
+            return output
+        }
+
+        let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let detail = errorOutput.isEmpty ? "failed to parse CFBundleIdentifier from IPA" : errorOutput
+        throw ControlError.protocolError(detail)
+    }
+
+    private static func signCertURL() -> URL? {
+        let fm = FileManager.default
+        let candidates = [
+            Bundle.main.resourceURL?.appendingPathComponent("signcert.p12"),
+            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/signcert.p12"),
+            URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent("scripts/vphoned/signcert.p12"),
+            URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent("../scripts/vphoned/signcert.p12"),
+        ]
+        for candidate in candidates.compactMap({ $0 }) {
+            if fm.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private static func runHostProcess(executableURL: URL, arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+        process.waitUntilExit()
+
+        let output = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let errorOutput = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        if process.terminationStatus == 0 {
+            return output
+        }
+        let detail = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        throw ControlError.protocolError(detail.isEmpty ? "host tool failed: \(executableURL.lastPathComponent)" : detail)
+    }
+
+    private static func buildInstallArchive(fromIPA ipaURL: URL) throws -> URL {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let extractDir = tempRoot.appendingPathComponent("extract", isDirectory: true)
+        try fm.createDirectory(at: extractDir, withIntermediateDirectories: true)
+
+        let dittoURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        _ = try runHostProcess(executableURL: dittoURL, arguments: ["-x", "-k", ipaURL.path, extractDir.path])
+
+        let tarURL = tempRoot.appendingPathComponent("package.tar")
+        let tarTool = URL(fileURLWithPath: "/usr/bin/tar")
+        _ = try runHostProcess(executableURL: tarTool, arguments: ["-cf", tarURL.path, "-C", extractDir.path, "."])
+        return tarURL
     }
 
     // MARK: - Guest Binary Hash
@@ -385,6 +485,103 @@ class VPhoneControl {
         _ = try await sendRequest(["t": "file_rename", "from": from, "to": to])
     }
 
+    func installIPA(localURL: URL) async throws -> String {
+        do {
+            return try await installIPAWithBuiltInInstaller(localURL: localURL)
+        } catch let ControlError.guestError(message) where message == "unknown type: ipa_install" {
+            throw ControlError.guestError(
+                "Guest vphoned does not support ipa_install yet. Reconnect or reboot the guest so the updated daemon can take over."
+            )
+        }
+    }
+
+    private func installIPAWithBuiltInInstaller(localURL: URL) async throws -> String {
+        let archiveURL = try Self.buildInstallArchive(fromIPA: localURL)
+        let data: Data
+        do {
+            data = try Data(contentsOf: archiveURL)
+        } catch {
+            throw ControlError.protocolError("failed to read install archive: \(error)")
+        }
+        defer {
+            try? FileManager.default.removeItem(at: archiveURL.deletingLastPathComponent())
+        }
+
+        let remoteDir = "/var/mobile/Documents/vphone-installs"
+        let remoteName = "\(UUID().uuidString)-\(localURL.deletingPathExtension().lastPathComponent).tar"
+        let remotePath = "\(remoteDir)/\(remoteName)"
+
+        var cleanupPaths = [remotePath]
+        defer {
+            Task {
+                for cleanupPath in cleanupPaths {
+                    try? await deleteFile(path: cleanupPath)
+                }
+            }
+        }
+
+        try await createDirectory(path: remoteDir)
+        try await uploadFile(path: remotePath, data: data)
+
+        var request: [String: Any] = [
+            "t": "ipa_install",
+            "path": remotePath,
+            "registration": "User",
+            "package_format": "tar",
+        ]
+
+        if let signCertURL = Self.signCertURL() {
+            let signCertData = try Data(contentsOf: signCertURL)
+            let certRemotePath = "\(remoteDir)/\(UUID().uuidString)-signcert.p12"
+            cleanupPaths.append(certRemotePath)
+            try await uploadFile(path: certRemotePath, data: signCertData)
+            request["cert_path"] = certRemotePath
+        }
+
+        let (resp, _) = try await sendRequest(request)
+        if let detail = resp["msg"] as? String, !detail.isEmpty {
+            return detail
+        }
+        return "Installed \(localURL.lastPathComponent) through the built-in IPA installer."
+    }
+
+    func installIPAWithTrollStoreLite(localURL: URL) async throws -> String {
+        let data: Data
+        do {
+            data = try Data(contentsOf: localURL)
+        } catch {
+            throw ControlError.protocolError("failed to read IPA: \(error)")
+        }
+        let bundleIdentifier = try Self.bundleIdentifier(fromIPA: localURL)
+
+        let remoteDir = "/var/mobile/Documents/vphone-installs"
+        let remoteName = "\(UUID().uuidString)-\(localURL.lastPathComponent)"
+        let remotePath = "\(remoteDir)/\(remoteName)"
+        defer {
+            Task {
+                try? await deleteFile(path: remotePath)
+            }
+        }
+
+        try await createDirectory(path: remoteDir)
+        try await uploadFile(path: remotePath, data: data)
+
+        do {
+            let (resp, _) = try await sendRequest([
+                "t": "tslite_install",
+                "path": remotePath,
+                "bundle_id": bundleIdentifier,
+                "registration": "User",
+            ])
+            if let detail = resp["msg"] as? String, !detail.isEmpty {
+                return detail
+            }
+            return "Installed \(localURL.lastPathComponent) through TrollStore Lite."
+        } catch {
+            throw error
+        }
+    }
+
     // MARK: - Location
 
     func sendLocation(
@@ -517,7 +714,7 @@ class VPhoneControl {
 
     private static func timeoutForRequest(type: String) -> TimeInterval {
         switch type {
-        case "file_get", "file_put":
+        case "file_get", "file_put", "tslite_install", "ipa_install":
             transferRequestTimeout
         case "devmode", "file_list", "file_delete", "file_rename", "file_mkdir":
             slowRequestTimeout
