@@ -652,6 +652,18 @@ class VPhoneControl {
         _ = try await sendRequest(req)
     }
 
+    func darwinNotify(name: String) async throws {
+        _ = try await sendRequest(["t": "darwin_notify", "name": name])
+    }
+
+    func lowPowerMode(enabled: Bool) async throws {
+        let (resp, _) = try await sendRequest(["t": "low_power_mode", "enabled": enabled])
+        let ok = resp["ok"] as? Bool ?? false
+        if !ok {
+            throw ControlError.guestError("low_power_mode: IOKit call failed on guest (check vphoned log)")
+        }
+    }
+
     // MARK: - Accessibility
 
     func accessibilityTree(depth: Int = -1) async throws -> [String: Any] {

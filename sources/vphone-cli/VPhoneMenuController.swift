@@ -36,6 +36,13 @@ class VPhoneMenuController {
     var screenRecorder: VPhoneScreenRecorder?
     var recordingItem: NSMenuItem?
     weak var captureView: VPhoneVirtualMachineView?
+    var batterySyncEnabled = false
+    var batterySyncStatusItem: NSMenuItem?
+    var batteryLevelMenuItems: [NSMenuItem] = []
+    var batteryConnectivityMenuItems: [NSMenuItem] = []
+    var powerSourceRunLoopSource: CFRunLoopSource?
+    var powerSourceRetainedPtr: UnsafeMutableRawPointer?
+    var lowPowerObserver: (any NSObjectProtocol)?
 
     init(keyHelper: VPhoneKeyHelper, control: VPhoneControl) {
         self.keyHelper = keyHelper

@@ -29,6 +29,7 @@
 #import "vphoned_install.h"
 #import "vphoned_keychain.h"
 #import "vphoned_location.h"
+#import "vphoned_notify.h"
 #import "vphoned_protocol.h"
 #import "vphoned_settings.h"
 #import "vphoned_url.h"
@@ -379,6 +380,15 @@ static BOOL handle_client(int fd) {
         // Accessibility tree
         if ([t isEqualToString:@"accessibility_tree"]) {
           NSDictionary *resp = vp_handle_accessibility_command(msg);
+          if (resp && !vp_write_message(fd, resp))
+            break;
+          continue;
+        }
+
+        // Power state and Darwin notification commands
+        if ([t isEqualToString:@"low_power_mode"] ||
+            [t isEqualToString:@"darwin_notify"]) {
+          NSDictionary *resp = vp_handle_notify_command(msg);
           if (resp && !vp_write_message(fd, resp))
             break;
           continue;
