@@ -46,6 +46,18 @@ extension VPhoneMenuController {
         batteryConnectivityMenuItems = [charging, disconnected]
 
         item.submenu = menu
+
+        // Enable sync by default
+        syncItem.state = .on
+        batterySyncEnabled = true
+        batterySyncStatusItem?.isHidden = false
+        batteryLevelMenuItems.forEach { $0.isEnabled = false }
+        batteryConnectivityMenuItems.forEach { $0.isEnabled = false }
+        syncBatteryFromHost()
+        syncLowPowerModeFromHost()
+        startPowerSourceMonitoring()
+        startLowPowerMonitoring()
+
         return item
     }
 
