@@ -395,8 +395,10 @@ Why the guest compiles at all, and why it starts over at each boot:
 
 - CoreAnimation normally renders from precompiled pipelines in
   `MTLBinaryArchive`s. On the paravirtual GPU, backboardd logs `Precompiled
-  pipelines disabled on unsupported hardware.`, so every pipeline is built at
-  run time, on its render thread.
+  pipelines disabled on unsupported hardware.`, disabling that source of
+  precompiled pipelines. The 2026-10-20 follow-up traced that notice to
+  an explicit virtualization check and tested archive compatibility separately;
+  see [CoreAnimation precompiled pipelines](coreanimation_precompiled_pipelines.md).
 - backboardd does keep a Metal cache. `StartWindowServer` calls
   `MTLSetShaderCachePath` with its system container's Caches
   (`/private/var/containers/Data/System/<uuid>/Library/Caches`, holding
