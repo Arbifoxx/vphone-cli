@@ -46,5 +46,8 @@ Stop the VM, then delete its `ShaderCache` directory. The next launch starts a
 fresh host cache. Guest Metal caches are separate files inside `Disk.img`, so
 clearing the host cache does not necessarily reproduce all first-run lag.
 
-Task3 is disabled in the tvOS presets. Runtime validation covered macOS 27.0.1,
-cloudOS 26.4 and an iOS 27.0.1 guest; older hosts have not been validated.
+Task3 applies to cloudOS 26.4 kernels only and is disabled in the tvOS presets.
+On a host older than macOS 27 the guest negotiates the host's own maximum version
+and keeps that version's features, so the host cache stays per-boot there.
+Runtime validation covered macOS 27.0.1, cloudOS 26.4, and iOS 27.0.1 and 26.6.2
+guests; older hosts were checked from their framework code, not run.

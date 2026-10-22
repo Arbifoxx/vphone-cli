@@ -319,6 +319,16 @@ struct FirmwarePatchSetCatalogTests {
             blocked: Set(FirmwarePatchSetCatalog.currentIdentifiers(["kernel-exp-paravirt_gpu_task3"])),
         )
         #expect(!blocked.isEnabled(patch))
+        // The kernel anchors exist only in cloudOS 26.4; earlier kernels must
+        // not select a patch whose discovery would abort the kernel install.
+        for (iOS, cloudOS) in [("18.6.2", "26.1"), ("26.2", "26.2"), ("26.3.1", "26.3")] {
+            let plan = try VPhonePatchPlan.resolve(
+                preset: FirmwarePatchSetCatalog.standardPreset,
+                patchSets: FirmwarePatchSetCatalog.bundled,
+                iOSBase: VPhoneVersion(iOS), cloudOS: VPhoneVersion(cloudOS),
+            )
+            #expect(!plan.isEnabled(patch))
+        }
         for preset in [FirmwarePatchSetCatalog.tvOSPreset, FirmwarePatchSetCatalog.tvOS4KPreset] {
             let plan = try VPhonePatchPlan.resolve(
                 preset: preset, patchSets: FirmwarePatchSetCatalog.bundled,

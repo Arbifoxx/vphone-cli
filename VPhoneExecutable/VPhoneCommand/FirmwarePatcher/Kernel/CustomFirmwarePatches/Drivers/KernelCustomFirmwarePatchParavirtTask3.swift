@@ -28,8 +28,15 @@
 //
 // The guest's own table stops at the version it was built for, so a granted 252
 // would come back invalid and the kext would step down again. The patch asks for
-// 252 and computes the guest's features from the original immediate, so the
-// guest keeps its behaviour while the host runs its Task3 path.
+// 252 and computes the guest's features from the lower of the granted version
+// and the original immediate, so the guest keeps its behaviour while the host
+// runs its Task3 path.
+//
+// A host that does not know the requested version grants its own maximum
+// instead, without the refusal bit: 245 on macOS 26.4, 233 on 26.0, 209 on
+// 15.6.1 (`-[_PGDevice setBinaryVersion:]`). Features computed from the kext's
+// own 245 there would claim flags the host never enabled, so a granted version
+// below the kext's own, or a refusal, still reaches the call unchanged.
 //
 // Anchor (no offsets): the `setupVersion` cstring, whose references all sit in
 // that one function; inside it, the request store and the readback of the same
@@ -63,7 +70,7 @@ extension KernelCustomFirmwarePatcher {
             return false
         }
 
-        var hits: [(request: Int, rd: UInt32, version: UInt16, featureArg: Int)] = []
+        var hits: [(request: Int, rd: UInt32, version: UInt16, granted: UInt32, featureArg: Int)] = []
         var off = funcStart
         while off < lastRef {
             defer { off += 4 }
@@ -71,21 +78,27 @@ extension KernelCustomFirmwarePatcher {
                   version >= 200, version < Self.paravirtTask3Version,
                   let regDisp = requestStore(of: rd, after: off),
                   let granted = readback(disp: regDisp, after: off),
+                  let grantedNumber = (0 ... 30).first(where: { ARM64Register.w($0) == granted.register }),
                   let featureArg = versionArgument(granted.register, after: granted.offset)
             else { continue }
-            hits.append((off, rd, version, featureArg))
+            hits.append((off, rd, version, UInt32(grantedNumber), featureArg))
         }
 
         guard hits.count == 1, let hit = hits.first else {
             log("  [-] version request not found uniquely (found \(hits.count))")
             return false
         }
+        // One cave: the identity trampoline, then the feature-version clamp.
+        let featureSlot = 256
         guard let request = ARM64Encoder.encodeMovzW(rd: hit.rd, imm16: Self.paravirtTask3Version),
-              let guestVersion = ARM64Encoder.encodeMovzW(rd: 0, imm16: hit.version),
               let identity = paravirtTaskIdentity(),
-              let cave = findCodeCave(size: 256),
-              let code = pvIdentityCode(identity, at: cave), code.count <= 256,
-              let branch = ARM64Encoder.encodeB(from: identity.hook, to: cave)
+              let cave = findCodeCave(size: featureSlot + 32),
+              let code = pvIdentityCode(identity, at: cave), code.count <= featureSlot,
+              let branch = ARM64Encoder.encodeB(from: identity.hook, to: cave),
+              let featureCode = pvFeatureVersionCode(
+                  granted: hit.granted, version: hit.version, at: cave + featureSlot, resume: hit.featureArg + 4,
+              ),
+              let featureBranch = ARM64Encoder.encodeB(from: hit.featureArg, to: cave + featureSlot)
         else {
             log("  [-] Task3 discovery or encoding failed; no Task3 sites written")
             return false
@@ -104,13 +117,39 @@ extension KernelCustomFirmwarePatcher {
             description: "binary version request mov w\(hit.rd),#\(hit.version) -> #\(Self.paravirtTask3Version)",
         )
         emit(
+            cave + featureSlot,
+            featureCode,
+            patchID: FirmwarePatchSetCatalog.paravirtTask3Patch + ".features_code",
+            virtualAddress: fileOffsetToVA(cave + featureSlot),
+            description: "guest features from min(granted, \(hit.version)); a refusal passes through",
+        )
+        emit(
             hit.featureArg,
-            guestVersion,
+            featureBranch,
             patchID: FirmwarePatchSetCatalog.paravirtTask3Patch + ".features",
             virtualAddress: fileOffsetToVA(hit.featureArg),
-            description: "guest features from the granted version -> mov w0,#\(hit.version)",
+            description: "guest features version mov x0,x\(hit.granted) -> b clamp",
         )
         return true
+    }
+
+    /// `x0` for the guest's feature lookup: the granted version, or the kext's
+    /// own when the host granted a newer one. A granted version below the
+    /// kext's own (an older host's maximum) and a refusal (bit 31) pass through
+    /// as the displaced `mov x0, xV` would have passed them.
+    private func pvFeatureVersionCode(granted: UInt32, version: UInt16, at cave: Int, resume: Int) -> Data? {
+        let passThrough = cave + 20
+        let words: [Data?] = [
+            ARM64Encoder.encodeSubImm12(rd: 0, rn: granted, imm12: UInt32(version) + 1),
+            ARM64Encoder.encodeTestBitBranch(nonzero: true, register: 0, bit: 63, from: cave + 4, to: passThrough),
+            ARM64Encoder.encodeTestBitBranch(nonzero: true, register: granted, bit: 31, from: cave + 8, to: passThrough),
+            ARM64Encoder.encodeMovzW(rd: 0, imm16: version),
+            ARM64Encoder.encodeB(from: cave + 16, to: resume),
+            ARM64Encoder.encodeMovX(rd: 0, rm: granted),
+            ARM64Encoder.encodeB(from: cave + 24, to: resume),
+        ]
+        guard words.allSatisfy({ $0 != nil }) else { return nil }
+        return words.compactMap { $0 }.reduce(into: Data()) { $0.append($1) }
     }
 
     /// The register number and value when the instruction at `off` is a lone

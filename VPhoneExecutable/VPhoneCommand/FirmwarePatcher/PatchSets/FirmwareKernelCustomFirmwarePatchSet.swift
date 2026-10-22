@@ -330,6 +330,9 @@ public enum FirmwareKernelCustomFirmwarePatchSet {
                 retains a separate shader cache for each executable across boots.
                 """,
                 target: .firmware(.kernelcache),
+                // The task initializer and owning-task anchors differ on the
+                // cloudOS 26.1–26.3 kernels; discovery fails there.
+                applicability: VPhonePatchApplicability(cloudOS: .release(major: 26, minor: 4)),
             ),
         ],
         requires: ["vphone.kernel.base"],

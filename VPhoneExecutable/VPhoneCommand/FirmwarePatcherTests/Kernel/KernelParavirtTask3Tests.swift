@@ -20,10 +20,10 @@ struct KernelParavirtTask3Tests {
         let data = try Data(contentsOf: URL(fileURLWithPath: #require(Self.fixture)))
         let patcher = prepared(data)
         #expect(patcher.patchParavirtTask3Version())
-        #expect(patcher.patches.count == 4)
+        #expect(patcher.patches.count == 5)
         let ids = Set(patcher.patches.map(\.patchID))
         let prefix = FirmwarePatchSetCatalog.paravirtTask3Patch
-        #expect(ids == Set(["request", "features", "identity_hook", "identity_code"].map { prefix + "." + $0 }))
+        #expect(ids == Set(["request", "features", "features_code", "identity_hook", "identity_code"].map { prefix + "." + $0 }))
 
         let code = try #require(patcher.patches.first { $0.patchID == prefix + ".identity_code" })
         let hook = try #require(patcher.patches.first { $0.patchID == prefix + ".identity_hook" })
@@ -31,9 +31,53 @@ struct KernelParavirtTask3Tests {
             try executeTrampoline(code, hook: hook, procAvailable: availability.0, hashAvailable: availability.1)
         }
 
+        // Hosts grant 252 (macOS 27), their own maximum (245 on 26.4, 233 on
+        // 26.0, 209 on 15.6.1) or a refusal. Only a version above the kext's
+        // own becomes the kext's own.
+        let features = try #require(patcher.patches.first { $0.patchID == prefix + ".features" })
+        let clamp = try #require(patcher.patches.first { $0.patchID == prefix + ".features_code" })
+        for (granted, expected): (UInt64, UInt64) in [(252, 245), (246, 245), (245, 245), (233, 233), (209, 209), (0x8000_00F5, 0x8000_00F5)] {
+            #expect(try executeFeatureClamp(clamp, branch: features, granted: granted) == expected)
+        }
+
         let second = prepared(patcher.patchedData)
         #expect(!second.patchParavirtTask3Version())
         #expect(second.patches.isEmpty)
+    }
+
+    /// Run the feature-version clamp from the branch that replaced the
+    /// `mov x0, xV` and return `x0` where it rejoins the kext, one past that site.
+    private func executeFeatureClamp(_ code: PatchRecord, branch: PatchRecord, granted: UInt64) throws -> UInt64 {
+        let decoder = ARM64Disassembler()
+        let jump = try #require(decoder.disassemble(branch.patchedBytes, at: UInt64(branch.fileOffset)).first)
+        let displaced = try #require(decoder.disassemble(branch.originalBytes, at: UInt64(branch.fileOffset)).first)
+        let grantedRegister = try #require(displaced.detail?.operands.last?.reg)
+        #expect(jump.mnemonic == "b" && jump.detail?.operands.first?.imm == Int64(code.fileOffset))
+        let instructions = decoder.disassemble(code.patchedBytes, at: UInt64(code.fileOffset))
+        // tbnz names the W register for bits below 32; keep one X slot per register.
+        func wide(_ r: ARM64Register) -> ARM64Register {
+            (0 ... 30).first { ARM64Register.w($0) == r }.map { .x($0) } ?? r
+        }
+        var registers: [ARM64Register: UInt64] = [wide(grantedRegister): granted, .x(0): 0x1234]
+        var pc = code.fileOffset
+        for _ in 0 ..< 10 {
+            if pc == branch.fileOffset + 4 { break }
+            let i = try #require(instructions.first { $0.address == UInt64(pc) })
+            let p = try #require(i.detail?.operands)
+            var next = pc + 4
+            switch i.mnemonic {
+            case "sub": registers[wide(p[0].reg)] = registers[wide(p[1].reg), default: 0] &- UInt64(p[2].imm)
+            case "tbnz": if registers[wide(p[0].reg), default: 0] >> UInt64(p[1].imm) & 1 == 1 { next = Int(p[2].imm) }
+            case "mov" where p[1].type == .immediate: registers[wide(p[0].reg)] = UInt64(p[1].imm)
+            case "mov": registers[wide(p[0].reg)] = registers[wide(p[1].reg), default: 0]
+            case "b": next = Int(p[0].imm)
+            default: Issue.record("Unexpected clamp instruction: \(i)")
+            }
+            pc = next
+        }
+        #expect(pc == branch.fileOffset + 4)
+        #expect(registers[wide(grantedRegister)] == granted)
+        return registers[.x(0), default: 0]
     }
 
     /// Execute the emitted instructions with hostile caller-saved register

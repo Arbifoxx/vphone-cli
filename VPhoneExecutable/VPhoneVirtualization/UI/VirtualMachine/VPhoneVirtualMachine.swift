@@ -106,11 +106,17 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
             ecidHex = identity.ecidHex
             print("[vphone] ECID: \(identity.ecidHex)")
             print("[vphone] Predicted UDID: \(identity.udid)")
-            let shaderCache = try VPhoneShaderCache.prepare(
-                machineDirectory: options.configURL.deletingLastPathComponent(), ecid: identity.ecid,
-            )
-            self.shaderCache = shaderCache
-            print("[vphone] Shader cache: \(shaderCache.cacheURL.path)")
+            // The cache only saves recompiling; a VM that cannot keep one boots without it.
+            do {
+                let shaderCache = try VPhoneShaderCache.prepare(
+                    machineDirectory: options.configURL.deletingLastPathComponent(), ecid: identity.ecid,
+                )
+                self.shaderCache = shaderCache
+                print("[vphone] Shader cache: \(shaderCache.cacheURL.path)")
+            } catch {
+                shaderCache = nil
+                print("[vphone] Warning: shader cache not kept for this run: \(error.localizedDescription)")
+            }
             let outputURL = options.configURL.deletingLastPathComponent().appendingPathComponent(
                 "udid-prediction.txt",
             )
