@@ -23,6 +23,7 @@ extension GuestAPI {
         "libsigninfix.dylib",
         "libvphonegyro.dylib",
         "libvphoneattitude.dylib",
+        "libvphonepipelinearchive.dylib",
     ]
     static let environmentStaging = "/var/root/Library/Caches/vphone-environment"
 
@@ -59,8 +60,8 @@ extension GuestAPI {
             guard environmentLibraries.contains(name) else {
                 throw GuestAPIError.invalidRequest("\(name) is not part of the vphone environment")
             }
-            if ["libvphonegyro.dylib", "libvphoneattitude.dylib"].contains(name), !FileManager.default.fileExists(atPath: "/usr/lib/" + name) {
-                throw GuestAPIError.invalidRequest("Enable the motion sensor patch with cfw install or cfw update-environment first")
+            if ["libvphonegyro.dylib", "libvphoneattitude.dylib", "libvphonepipelinearchive.dylib"].contains(name), !FileManager.default.fileExists(atPath: "/usr/lib/" + name) {
+                throw GuestAPIError.invalidRequest("Enable the corresponding guest patch with cfw install or cfw update-environment first")
             }
             let staged = URL(fileURLWithPath: environmentStaging + "/" + name)
             guard let data = try? Data(contentsOf: staged, options: .mappedIfSafe) else {
@@ -104,6 +105,7 @@ extension GuestAPI {
             // backboardd owns the UI's HID connection. Do not restart it here:
             // a new gyro hook (or SystemHook which loads it) needs a reboot.
             "reboot_required": !rootReadOnly || names.contains("launchdhook-vphone.dylib")
+                || names.contains("libvphonepipelinearchive.dylib")
                 || names.contains("libvphonegyro.dylib") || names.contains("SystemHook-vphone.dylib"),
             "root_read_only": rootReadOnly,
         ]

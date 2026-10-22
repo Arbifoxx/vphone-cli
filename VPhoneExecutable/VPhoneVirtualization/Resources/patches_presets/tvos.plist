@@ -101,6 +101,7 @@
 			<string>restoreramdisk-boot-apfs_sha3_hash</string>
 			<string>system-apps-cfw-attitude</string>
 			<string>system-backboardd-cfw-gyroscope</string>
+			<string>system-backboardd-exp-pipeline_archive</string>
 			<string>system-campo-cfw-entitlements</string>
 			<string>system-debugserver-cfw-install</string>
 			<string>system-dyld-boot-arm64e_x1_bootstrap</string>

@@ -87,6 +87,7 @@
 			<string>system-dyld-exp-tv_tpro</string>
 			<string>kernel-exp-tv_tpro_pagers</string>
 			<string>system-tv-exp-ota_userland</string>
+			<string>system-backboardd-exp-pipeline_archive</string>
 		</array>
 	</dict>
 	<key>Summary</key>

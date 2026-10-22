@@ -1,7 +1,8 @@
 # CoreAnimation precompiled pipelines
 
-Investigation and descriptor/reboot follow-up, 2026-10-20–21. This records analysis and isolated probes,
-not a new renderer patch. Runtime scope: Lychee, iOS 27.0.1 (24A446,
+Investigation and optional renderer integration, 2026-10-20–21. This records
+binary analysis, isolated probes and the experimental archive hook below.
+Runtime scope: Lychee, iOS 27.0.1 (24A446,
 iPhone17,3), cloudOS 26.4 (23E5207q), macOS 27.0.1. No iOS 18 coverage.
 
 ## Findings
@@ -21,9 +22,10 @@ provided 22/22 strict hits after reboot, with an important preparation-order
 control described below.
 
 This establishes guest-side preparation and cross-boot reuse for those tested
-variants. It does not establish complete animation coverage, system-renderer
-integration, or elimination of host-side compilation. The existing persistent
-shader caches remain useful.
+variants. The optional hook below also passes system-renderer integration and
+reboot reuse. Neither result establishes complete animation coverage or
+elimination of host-side compilation. The existing persistent shader caches
+remain necessary to retain native host work.
 
 ## Artifact and evidence identity
 
@@ -332,3 +334,209 @@ Task3 cache; the earlier cross-process cache-mixing restriction still applies.
 Any future runtime patch must be declared, selectable and documented through
 the normal patch-set workflow. A shared global `IsVirtualDevice` spoof would
 affect unrelated framework decisions and is not an archive-compatibility fix.
+
+## Runtime integration prototype (2026-10-21)
+
+`system-backboardd-exp-pipeline_archive` installs
+`libvphonepipelinearchive.dylib`. SystemHook loads it only into backboardd;
+removing the selected library and rebooting disables it. Standard and both TV
+presets leave it off. The initial integration is gated to the iOS 27 renderer
+and virtual-driver combination investigated above; no iOS 18 port is claimed.
+There is no QuartzCore binary edit or global virtualization-property spoof.
+
+The hook overrides the three public Metal pipeline methods observed in the
+renderer probe, on AppleParavirtDevice itself. It recognizes CoreAnimation
+labels and attaches a compatible process-local archive to descriptor copies.
+A strict archive attempt establishes an actual hit. Misses use the original
+compiler API, options, error and reflection arguments. An explicit caller
+request to fail on an archive miss is preserved. Requests outside CoreAnimation
+retain their original behavior. Successful ordinary pipeline creation precedes
+harvesting, including compute pipelines, because of the harvest-only failure
+measured above. The worker retains descriptor copies, learns at most 1,024
+requests per process with at most 64 queued, and serializes a separate writer
+archive off the renderer thread. Readers are immutable snapshots. Writes use a
+pending file and rename, a process writer lock, and a 64 MiB archive limit.
+Missing, incompatible or corrupt archives fall back to ordinary compilation.
+
+Archives live inside the guest at the process's normal caches directory:
+`VPhonePipelineArchive/<program>/<identity>/archive.metallib`, beside a small
+`statistics.json`. Identity includes schema version, guest OS build, main
+executable UUID, Metal and QuartzCore UUIDs, the virtual-driver UUID, and the
+Metal architecture name. Framework identifiers are sorted so image load order
+cannot change the key. This is separate from the host's existing
+`<machine>/ShaderCache`; Task3 continues to use the owning executable's cdhash.
+Neither archive data nor host task directories are transplanted from a helper
+process into backboardd.
+
+After a 20-second startup delay, a utility worker renders four 96×96 offscreen
+CARenderer scenes inside backboardd and waits for GPU completion. This prepares
+solid, translucent/gradient, transformed/shadowed and image/border examples
+under the correct host task identity. This is bounded initial coverage, not a
+complete enumeration of SpringBoard/Settings or specialized backdrop variants.
+An empty cache still requires preparation/learning. A guest archive hit does
+not prove the host avoided AIR-to-native compilation; Task3 supplies that
+separate persistent cache. The delayed prewarm also does not promise to cover
+animations a user starts before it finishes.
+
+### Integration test procedure
+
+`VPhoneGuestComponents/Tests/PipelineArchiveProbe.swift` loads the **actual
+component binary**, rather than implementing a second hook. Build the component
+with its normal Makefile target, then build the probe with the iPhoneOS SDK:
+
+```sh
+xcrun --sdk iphoneos swiftc -swift-version 5 -target arm64e-apple-ios26.0 \
+  -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" -O \
+  VPhoneGuestComponents/Tests/PipelineArchiveProbe.swift \
+  -o /tmp/pipeline-integration-probe
+codesign --force --sign - /tmp/pipeline-integration-probe
+```
+
+Upload the probe and built dylib with Launchpad guest file RPCs. A temporary
+launchd job runs `pipeline-integration-probe baseline|prepare|reuse|prewarm`
+with optional cache-root and library-path arguments. The default research root
+is `/var/mobile/Library/VPhonePipelineIntegration`, deliberately outside the
+boot-purged `/var/tmp` where the executable and library are staged. Keep the
+same probe executable between preparation and reuse. Unload the temporary job
+before rebooting; upload the same binaries again after boot. Verify counters,
+archive SHA, all four GPU statuses and pixel SHAs. Non-CoreAnimation requests
+using an empty archive plus fail-on-miss are negative controls. Corrupt only
+the probe's own archive for recovery testing. Remove the temporary job/files
+and research cache after validation; never alter production task identities.
+
+Initial integration results (before the load-order key normalization):
+
+| Test | Result |
+| --- | --- |
+| Empty-cache collection | 20 render + 10 compute fallbacks, 30 harvested requests, one 198,877-byte archive |
+| Fresh process | 20 render + 10 compute strict archive hits, no fallbacks |
+| Full stop/start | Same 30 strict hits, same identity and archive SHA |
+| Pixel comparison | All four scene hashes match the unhooked baseline |
+| Empty-archive controls | All ten non-CoreAnimation compute requests fail as requested |
+| Explicit prewarm | Four completed GPU renders; 20 render hits before measured scenes |
+| Deliberately corrupt archive | Normal compilation succeeds and regenerates a readable archive |
+
+Evidence is under the local research folder's `phase3/` directory. Preparation
+boot UUID was `8D5EE5D0-8A33-46C0-8990-C9B7DBEB5191`; reuse boot UUID was
+`0A84436F-58CB-4990-9070-7D4CE00055E3`. Archive SHA-256 was
+`e854bcce19524b2360c3cad458958e103ce5a02700aa7132c6f2a7553f809fed`.
+System-renderer startup, real workload coverage and cold/warm host compiler
+measurements remain separate acceptance checks. No end-to-end lag-elimination
+claim follows from the standalone integration results.
+
+### Initial system renderer validation (2026-10-21)
+
+The initial schema-v1 component ran inside backboardd on Lychee, using the
+same library UUID `510DC33E-218B-31A9-9412-4ECA3DBC5FB3` as the standalone
+probe. Its persistent identity was
+`7e3d14a2abf2999cc0aa948911866f2974da658646bf2401b9d666cf3c73e347`.
+Three Settings launches/home transitions and a Camera launch were verified
+with runningboard foreground checks on each boot. These are request counts,
+not counts of distinct pipeline variants:
+
+| Boot | Render archive hits | Normal fallbacks / harvested requests | Prewarm GPU frames | Host GPU-task compilation events |
+| --- | ---: | ---: | ---: | ---: |
+| H, initial training | 33 | 208 | 4 | 16 |
+| I, reboot with both caches warm | 250 | 17 | 4 | 0 |
+| J, guest archive retained, host cache emptied | 258 | 1 | 4 | 613 |
+| K, original host snapshot restored | 260 | 0 | 4 | 0 |
+
+Boot I's startup/prewarm snapshot had 63 hits and zero fallbacks before the
+workload. All four final snapshots report no archive errors and zero pending
+harvests. Some additional variants appear with real UI activity; this prototype
+does not promise complete coverage. Boot UUIDs, exact foreground checks,
+statistics and compiler streams are in local `phase3/backboardd-boot*` evidence.
+The standalone checks, including a second reboot after sorting identity inputs,
+have 46 cross-file evidence assertions passing. Catalogue tests (23), injection
+environment tests and the complete VPhone bundle build passed.
+
+The cold-host result directly establishes that guest archives do not eliminate
+host compilation. `lsof` mapped host PID 37271 to backboardd's existing Task3
+key `e5543fa5f8667c6cb0d0da787f1b029a9ee3350d` through its open cache files.
+That task produced 344 compiler events: 42 opaque-airnt, 40 opaque and 262
+pipeline. The total 613 includes other VM GPU tasks. These were not attributed
+using process-age heuristics. H/I were already warm in the host layer; their
+16-to-zero result is not a controlled archive-on/off performance comparison.
+No animation latency or subjective lag-elimination claim is made.
+
+For the cold test, the complete 9.2 MiB machine ShaderCache snapshot was moved
+aside while the VM was stopped. The normal managed-cache reset path created a
+cold working copy at the next launch. After J stopped, the cold result was
+moved into research storage and the entire original snapshot restored; all
+33 file hashes match. No task identities or independent function lists were
+merged. The working copy is replaced from that restored snapshot on the next
+launch, by the existing cache manager.
+
+K verifies restoration with a real reboot/workload, rather than file hashes
+alone. Original selection/binding/receipt snapshots remain in
+`phase3/original-*`. The earlier environment-only install used a local test
+bundle with a temporary 20 GiB free-space threshold because the normal 50 GiB
+check refused at 24 GiB. That threshold was reverted before the final bundle
+build; it is not part of this implementation. The kernel was not updated.
+
+### Final identity and failure controls
+
+Review found that injected images can precede the executable in dyld's image
+list. Schema v1 incorrectly treated image zero as the executable. Program
+directories still separated the probe from backboardd, and Task3's host keys
+were unaffected, but program-update invalidation was unreliable. Schema v2
+explicitly locates `MH_EXECUTE`, requires its UUID, and ignores old v1 caches.
+Statistics expose that UUID to make this check observable.
+
+The final library UUID is `582B89CB-56E5-3E7A-ABB4-CA7442D2C562`, SHA-256
+`edefd89ebed34375e283b6c1659dc7881fb2e5c0879cfe29036d7227b3b1ebf0`.
+Backboardd's actual executable UUID is `BFD04CD7-A5F5-314C-9470-3494B9177E03`;
+its v2 identity is
+`6010a045d4c7f3d51ef028ddf12648cb85035f2eeb61fdd1883d26571d31fbff`.
+The standalone probe's executable UUID is
+`B025E8F3-073D-3815-B918-2F0F6EAE3BC6`, with a different identity
+`86d1ce34e5dbcc1e11aea0b7e592223de5233bd8569e95643f8dd1707c8a92e6`.
+
+Final-component controls in `phase3/bootK-v2-*` verify:
+
+- Preparation collects 20 render plus 10 compute requests; a fresh process
+  serves all 30 as strict hits with no fallbacks.
+- Rebuilding the same program at the same path changes its executable UUID
+  and cache identity, producing 30 normal fallbacks into a separate archive.
+  Restoring the original binary recovers its original 30 hits.
+- A nonempty directory at the archive destination forces a rename failure.
+  Rendering still completes, the blocker is unchanged, and statistics record
+  an error without claiming a successful save. Removing the obstruction
+  allows collection and then 30 strict hits again.
+- An unavailable cache root also preserves ordinary rendering. Candidate
+  archives are validated before atomic replacement, size checked and reopened
+  at the durable URL. Writer locks reject symlinks and non-regular files.
+
+Boot L reloads the final library and reports a read-only guest root with its
+SHA matching the final bundle. The probe again serves all 30 hits across that
+reboot, with identical pixels and ten passing empty-archive negative controls.
+The normal-guard final bundle is `2.10.1-local.fbd5f6d4`; the earlier offline
+environment provenance remains `2.10.1-local.e45d725a`. The selected library
+was replaced using the supported live environment RPC, then rebooted; the
+provenance field is not a claim that the running library is still the old one.
+
+| Final v2 boot | Render archive hits | Normal fallbacks | Prewarm GPU frames | Host GPU-task compilation events |
+| --- | ---: | ---: | ---: | ---: |
+| L, fresh v2 archive with host cache retained | 33 | 235 | 4 | 0 |
+| M, reboot with v2 archive and host cache retained | 254 | 0 | 4 | 0 |
+
+The compiler streams separately record eight host display-service compilation
+events on each boot, including `displayPresent*` and blit functions. They are
+not guest GPU-task compiler events. The live `lsof` snapshot identifies M's
+parent as Virtualization.framework's VM XPC service, rather than a guest task
+process. Zero in the table therefore does not mean zero Metal compilation
+anywhere on the Mac. K/L/M console logs contain no GPU-reset notices.
+
+The final evidence validator passes 50 cross-file assertions, including pixel
+comparisons against the unhooked baseline, failure controls, identity changes,
+reboot hits and the renderer/Camera crash audit. H–M have no new or modified
+backboardd, SpringBoard or cameracaptured reports. Existing widget reports
+continue to change; K adds a BarcodeScanner widget report with the same trap
+signature as an earlier report, and L adds a searchd breakpoint report. Neither
+process loaded this hook. This is not a claim that the VM is crash-free or
+proof that every unrelated failure has been explained. M adds no new report
+paths. Temporary probe jobs/files and the probe's persistent research caches
+are removed after testing; the backboardd archive is retained.
+
+A broader prewarm profile and native cold-compile timing remain follow-up
+work. These four scenes do not pregenerate every possible animation.

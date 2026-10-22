@@ -3297,3 +3297,66 @@ validation; older host compatibility remains untested.
 Promotion validation: 62 focused tests passed, as did the full `VPhone` bundle
 build and admission check. The built CLI recognized Lychee's old Task3 receipt
 under the new name as applied, enabled by its preset and not pending.
+
+### Experimental CoreAnimation archive attachment (2026-10-21)
+
+`system-backboardd-exp-pipeline_archive` is a new selectable guest-file patch:
+install/remove `/usr/lib/libvphonepipelinearchive.dylib`, loaded by SystemHook
+only in backboardd. Standard and TV presets block it. Its initial applicability
+is iOS 27, whose QuartzCore/AppleParavirtDevice path was inspected and tested;
+this does not enable the prototype for iOS 18. No kernel instruction, shared
+cache byte, Task3 identity or virtualization-property change is added.
+
+The runtime hook copies CoreAnimation pipeline descriptors and attaches an
+archive even on the ordinary creation path, covering labels outside Apple's
+607-name strict-loader table. Strict hits return the saved pipeline; misses
+preserve ordinary compilation. Compute harvesting follows successful ordinary
+PSO creation. A serial worker writes bounded, process-specific archives keyed
+to OS/executable/framework/driver/architecture identity. A delayed four-scene
+CARenderer prewarm runs inside the owning renderer process, thereby warming its
+own Task3 host cache as well. Archive failures retain normal compilation.
+
+Reveal/validation: see `Guest/coreanimation_precompiled_pipelines.md` for the
+virtualization gate, missing ordinary-path attachment, runtime scope and
+probe procedure. The actual new dylib passed standalone collection, fresh
+process and reboot reuse (20 render plus 10 compute strict hits), identical
+scene pixels, empty-archive negative controls and corrupt-file recovery.
+System backboardd integration and host compilation/animation measurements are
+additional acceptance checks; this is not a measured lag-elimination result.
+The guest library is staged, signed and admitted with the normal bundle; its
+manifest selection installs/removes it, live updates replace only an already
+enabled copy, and changing the loaded backboardd hook requires a reboot.
+
+Runtime follow-up: the hook now passed actual backboardd startup/prewarm and
+Settings/Camera workloads. Initial training collected 208 render requests;
+the next boot served 250 archive hits with 17 additional fallbacks and zero
+host GPU-task compiler events. With the guest archive retained and only the
+host cache made cold, 258 requests hit the archive but the host still compiled
+613 items (344 mapped specifically to backboardd by open Task3 cache files).
+Thus guest archive hits and native host cache reuse are distinct requirements.
+The complete pre-test host snapshot was restored after shutdown and all 33
+file hashes verified. The next workload served 260 archive hits, no fallbacks
+and zero guest GPU-task host compilation events, verifying restoration.
+
+Final review corrected executable identification: injected images can precede
+the main image, so schema v2 searches for `MH_EXECUTE` instead of using dyld
+image zero. The probe and backboardd now expose distinct verified executable
+UUIDs and cache keys. Rebuilding the same program at the same path produces a
+new archive; restoring its original binary recovers the original 30 strict
+hits. A forced rename failure and an unavailable cache root preserve ordinary
+rendering and identical pixels. Failed writes report errors and recover once
+the obstruction is removed. The archive candidate is validated before atomic
+replacement, and the writer lock requires an owned regular file.
+
+With the final v2 library, fresh training produced 235 fallbacks and 33 hits;
+the next reboot/workload produced 254 hits and no fallbacks. Both completed
+four prewarm frames and recorded zero guest GPU-task host compilation events.
+Each boot separately recorded eight host display-service compile events; this
+is not a claim of zero compilation system-wide. The standalone v2 archive also
+passed reboot reuse with all 30 hits, identical pixels and ten negative
+controls. Fifty final evidence assertions, 23 catalogue tests, injection tests
+and the full normal-guard bundle build pass. Renderer/Camera crash reports
+remain unchanged, though widget reports and one searchd report require the
+qualification documented in the guest research report. Research probe caches
+are removed; production renderer caches remain. The temporary free-space
+threshold change is absent from the final source and bundle.

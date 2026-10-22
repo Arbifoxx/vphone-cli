@@ -17,6 +17,25 @@ import VPhonePatchKit
 
 @Suite("Bundled patch set catalogue")
 struct FirmwarePatchSetCatalogTests {
+    @Test func `CoreAnimation archives require explicit selection and a supported guest`() throws {
+        let identifier = FirmwareGuestSystemPatchSet.pipelineArchive
+        for base in [nil, "18.6.2", "26.4", "27.0.1", "28.0"] as [String?] {
+            let version = base.flatMap(VPhoneVersion.init)
+            let standard = try VPhonePatchPlan.resolve(
+                preset: FirmwarePatchSetCatalog.standardPreset, patchSets: FirmwarePatchSetCatalog.bundled,
+                iOSBase: version, cloudOS: VPhoneVersion("26.4"),
+            )
+            #expect(!standard.isEnabled(identifier))
+            var selected = FirmwarePatchSetCatalog.standardPreset
+            selected.selection = selected.selection.allowing([identifier])
+            let enabled = try VPhonePatchPlan.resolve(
+                preset: selected, patchSets: FirmwarePatchSetCatalog.bundled,
+                iOSBase: version, cloudOS: VPhoneVersion("26.4"),
+            )
+            #expect(enabled.isEnabled(identifier) == (base == "27.0.1"))
+        }
+    }
+
     @Test(arguments: [FirmwareGuestSystemPatchSet.gyroscope, FirmwareGuestSystemPatchSet.attitude])
     func `Motion sensors follow selection and their deployment target`(identifier: String) throws {
         for base in ["18.6.2", "26.4", "27.0.1"] {

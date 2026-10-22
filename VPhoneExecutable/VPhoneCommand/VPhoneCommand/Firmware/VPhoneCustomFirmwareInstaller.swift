@@ -1090,6 +1090,7 @@ struct VPhoneCustomFirmwareInstaller {
                 return !FirmwareGuestSystemPatchSet.settingsRowPatches.contains(identifier)
                     && identifier != FirmwareGuestSystemPatchSet.gyroscope
                     && identifier != FirmwareGuestSystemPatchSet.attitude
+                    && identifier != FirmwareGuestSystemPatchSet.pipelineArchive
             }
             guard plan.isEnabled(identifier) else {
                 print("  [·] \(identifier): off in preset \(plan.presetIdentifier)")
@@ -1254,6 +1255,7 @@ struct VPhoneCustomFirmwareInstaller {
         for (identifier, library) in [
             (FirmwareGuestSystemPatchSet.gyroscope, "libvphonegyro.dylib"),
             (FirmwareGuestSystemPatchSet.attitude, "libvphoneattitude.dylib"),
+            (FirmwareGuestSystemPatchSet.pipelineArchive, "libvphonepipelinearchive.dylib"),
         ] {
             isolate([identifier]) {
                 let path = "usr/lib/" + library

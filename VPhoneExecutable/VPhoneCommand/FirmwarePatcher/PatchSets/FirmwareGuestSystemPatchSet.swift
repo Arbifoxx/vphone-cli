@@ -25,6 +25,7 @@ public enum FirmwareGuestSystemPatchSet {
     public static let metalCacheReuseMarker = "/usr/lib/vphone-metal-cache-reuse"
     public static let gyroscope = "system-backboardd-cfw-gyroscope"
     public static let attitude = "system-apps-cfw-attitude"
+    public static let pipelineArchive = "system-backboardd-exp-pipeline_archive"
     public static let arm64eX1DyldBootstrap = "system-dyld-boot-arm64e_x1_bootstrap"
     public static let arm64eX1CacheBootstrap = "dyld-boot-arm64e_x1_bootstrap"
     public static let arm64eX1LaunchdBootstrap = "system-launchd-boot-arm64e_x1_bootstrap"
@@ -333,6 +334,14 @@ public enum FirmwareGuestSystemPatchSet {
                 """,
                 target: .guestFile(path: "/Library/LaunchDaemons"),
                 bootEssential: true,
+            ),
+
+            VPhonePatchDeclaration(
+                identifier: pipelineArchive,
+                title: "CoreAnimation pipeline archives",
+                summary: "Experimental: installs a backboardd hook that learns and reloads CoreAnimation Metal pipeline archives and prewarms representative offscreen scenes under its own GPU task identity. Misses compile normally. Removing the library disables it after a reboot.",
+                target: .guestFile(path: "/usr/lib/libvphonepipelinearchive.dylib"),
+                applicability: ios27,
             ),
 
             // MARK: Motion

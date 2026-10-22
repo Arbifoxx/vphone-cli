@@ -255,6 +255,7 @@ __attribute__((constructor)) static void vpLogProcess(void) {
     }
     if (vpIsGyroscopeDaemon(path)) {
         vpLoadLibrary("gyroscope-hook", VP_GYROSCOPE_HOOK);
+        vpLoadLibrary("pipeline-archive", "/usr/lib/libvphonepipelinearchive.dylib");
         return;
     }
     // SpringBoard needs the haptics swizzle before UIKit first asks for an

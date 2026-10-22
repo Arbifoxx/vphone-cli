@@ -122,7 +122,7 @@ fi
 
 for name in vphoned vphoned-tvos launchdhook-vphone.dylib SystemHook-vphone.dylib libcamfix.dylib \
     libvcamcaptured.dylib libmisfix.dylib libhapticsfix.dylib libbatteryhealthfix.dylib libdevicehubfix.dylib libdevicename.dylib \
-    libprefsfix.dylib libsigninfix.dylib libvphonegyro.dylib libvphoneattitude.dylib libAppleParavirtCompilerPluginIOGPUFamily.dylib; do
+    libprefsfix.dylib libsigninfix.dylib libvphonegyro.dylib libvphoneattitude.dylib libvphonepipelinearchive.dylib libAppleParavirtCompilerPluginIOGPUFamily.dylib; do
     require_signed_macho "$guest/$name"
 done
 for name in vphoned.plist libcamfix.plist libvcamcaptured.plist libmisfix.plist; do
